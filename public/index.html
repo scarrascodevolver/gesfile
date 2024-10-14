@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GesFile</title>
+    <style>
+        button {
+            margin-right: 10px;
+        }
+
+        .nav-buttons {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .nav-buttons button {
+            margin: 0 10px;
+        }
+
+        #file-list {
+            list-style: none;
+            padding: 0;
+            text-align: center;
+            margin: 20px auto;
+            width: 50%;
+        }
+
+        #file-list li {
+            padding: 10px;
+            border: 1px solid #ccc;
+            margin: 5px 0;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        #file-list li.directory {
+            background-color: yellow;
+            padding: 6px;
+            font-weight: bold;
+        }
+
+        #file-list li:hover {
+            background-color: #f0f0f0;
+        }
+
+        .upload-form {
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        .current-path {
+            text-align: center;
+            margin: 20px 0;
+            font-size: 18px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1 style="text-align: center;">GesFile</h1>
+
+    <!-- Mostrar la ruta actual -->
+    <div class="current-path" id="current-path-display">Ruta actual: Raíz</div>
+
+    <!-- Botones de navegación -->
+    <div class="nav-buttons">
+        <button id="back-btn" disabled>Atrás</button>
+        <button id="root-btn">Ir a la Raíz</button>
+        <button id="forward-btn" disabled>Adelante</button>
+    </div>
+
+    <!-- Formulario de subida de archivos -->
+    <div class="upload-form">
+        <form id="uploadForm" enctype="multipart/form-data" method="POST" action="/upload">
+            <input type="file" name="file" required />
+            <button type="submit">Subir archivo</button>
+        </form>
+    </div>
+
+    <ul id="file-list"></ul>
+
+    <script>
+        let currentPath = '';  // Ruta actual
+        let history = [];     // Historial de navegación
+        let historyIndex = -1; // Índice del historial
+
+        // Cargar archivos desde el servidor
+        async function loadFiles(path = '') {
+            console.log(`Cargando archivos desde: ${path || 'Raíz'}`);
+
+            try {
+                const response = await fetch(`/files?path=${path}`);
+                const files = await response.json();
+                console.log('Archivos recibidos:', files);
+
+                const fileList = document.getElementById('file-list');
+                fileList.innerHTML = '';  // Limpiar la lista de archivos
+
+                // Generar la lista de archivos y carpetas
+                files.forEach(file => {
+                    const listItem = document.createElement('li');
+                    listItem.textContent = file.name;
+
+                    // Añadir clase para directorios y eventos para navegar
+                    if (file.type === 'directory') {
+                        listItem.classList.add('directory');
+                        listItem.addEventListener('click', () => navigateTo(path ? `${path}/${file.name}` : file.name));
+                    } else {
+                        // Solo añadir evento para archivos (para ver o eliminar)
+                        listItem.addEventListener('click', () => viewFile(path ? `${path}/${file.name}` : file.name));
+                    }
+
+                    // Botón de eliminar archivo o carpeta
+                    const deleteButton = document.createElement('button');
+                    deleteButton.textContent = 'Eliminar';
+                    deleteButton.addEventListener('click', (e) => {
+                        e.stopPropagation();  // Evitar que el click sobre el botón dispare el evento del elemento de la lista
+                        deleteFileOrFolder(path ? `${path}/${file.name}` : file.name);
+                    });
+
+                    listItem.appendChild(deleteButton);
+                    fileList.appendChild(listItem);
+                });
+
+                // Actualizar los botones de navegación
+                updateNavigationButtons();
+
+                // Actualizar la acción del formulario de subida
+                document.getElementById('uploadForm').action = `/upload?path=${path}`;
+
+                // Mostrar la ruta actual en la interfaz
+                document.getElementById('current-path-display').textContent = `Ruta actual: ${path || 'Raíz'}`;
+
+            } catch (error) {
+                console.error('Error al cargar archivos:', error);
+            }
+        }
+
+        // Eliminar archivo o carpeta
+        async function deleteFileOrFolder(filePath) {
+            console.log(`Eliminando: ${filePath}`);
+            try {
+                const response = await fetch('/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: filePath })
+                });
+
+                if (response.ok) {
+                    console.log(`Eliminado: ${filePath}`);
+                    loadFiles(currentPath); // Recargar archivos
+                } else {
+                    console.error('Error al eliminar:', await response.text());
+                }
+            } catch (error) {
+                console.error('Error al eliminar:', error);
+            }
+        }
+
+        // Ver archivo (mostrar solo contenido de archivos de texto)
+        async function viewFile(filePath) {
+            console.log(`Visualizando archivo: ${filePath}`);
+            try {
+                const response = await fetch(`/view-file?path=${filePath}`);
+                const data = await response.text();
+                document.body.innerHTML = data; // Mostrar contenido en la misma página
+            } catch (error) {
+                console.error('Error al visualizar archivo:', error);
+            }
+        }
+
+        // Navegar a una carpeta
+        function navigateTo(path) {
+            console.log(`Navegando a: ${path}`);
+            history.push(path);
+            historyIndex = history.length - 1;
+            loadFiles(path);
+        }
+
+        // Volver a la carpeta anterior
+        function goBack() {
+            if (historyIndex > 0) {
+                historyIndex--;
+                currentPath = history[historyIndex];
+                loadFiles(currentPath);
+            }
+        }
+
+        // Ir a la carpeta siguiente
+        function goForward() {
+            if (historyIndex < history.length - 1) {
+                historyIndex++;
+                currentPath = history[historyIndex];
+                loadFiles(currentPath);
+            }
+        }
+
+        // Ir a la raíz
+        function goToRoot() {
+            currentPath = '';
+            history.push('');
+            historyIndex = history.length - 1;
+            loadFiles(currentPath);
+        }
+
+        // Actualizar estado de los botones de navegación
+        function updateNavigationButtons() {
+            document.getElementById('back-btn').disabled = historyIndex <= 0;
+            document.getElementById('forward-btn').disabled = historyIndex >= history.length - 1;
+        }
+
+        // Asignar eventos a los botones
+        document.getElementById('back-btn').addEventListener('click', goBack);
+        document.getElementById('forward-btn').addEventListener('click', goForward);
+        document.getElementById('root-btn').addEventListener('click', goToRoot);
+
+        // Cargar archivos en la raíz al inicio
+        loadFiles();
+
+        // Manejar la subida de archivos con AJAX para evitar la recarga de página
+        document.getElementById('uploadForm').addEventListener('submit', async function(event) {
+            event.preventDefault();  // Evitar el envío tradicional del formulario
+
+            const formData = new FormData(this); // Obtener los datos del formulario
+
+            try {
+                const response = await fetch(this.action, {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                const result = await response.json();
+                console.log('Resultado de la subida de archivo:', result);
+
+                if (result.success) {
+                    // Recargar archivos en la misma ruta donde se subió el archivo
+                    loadFiles(currentPath);  // Recargar archivos en la misma carpeta
+                } else {
+                    console.error('Error en la subida del archivo:', result);
+                }
+            } catch (error) {
+                console.error('Error al subir el archivo:', error);
+            }
+        });
+    </script>
+</body>
+</html>
